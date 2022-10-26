@@ -1,10 +1,13 @@
 package com.hmdp.service.impl;
 
+import cn.hutool.json.JSONUtil;
 import com.hmdp.dto.Result;
 import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.User;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
+import com.hmdp.rabbitmq.MQSender;
+import com.hmdp.rabbitmq.MQreceiver;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
@@ -13,6 +16,7 @@ import com.hmdp.utils.SimpleRedisLock;
 import com.hmdp.utils.UserHolder;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.aop.framework.AopContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.core.io.ClassPathResource;
@@ -47,6 +51,10 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     private StringRedisTemplate stringRedisTemplate;
     @Resource
+    private MQSender mqSender;
+    @Resource
+    private MQreceiver mQreceiver;
+    @Resource
     private RedissonClient redissonClient;
     private static final DefaultRedisScript<Long> SECKILL_SCRIPT;
     static {
@@ -54,31 +62,35 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         SECKILL_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
         SECKILL_SCRIPT.setResultType(Long.class);
     }
-    private final ArrayBlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<VoucherOrder>(1024*1024);
-    private final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
-    @PostConstruct
-    private void init(){
-        //向线程池中创建这个线程
-        SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
-    }
-    private class VoucherOrderHandler implements Runnable{
+//    private final ArrayBlockingQueue<VoucherOrder> orderTasks = new ArrayBlockingQueue<VoucherOrder>(1024*1024);
+ //   private final ExecutorService SECKILL_ORDER_EXECUTOR = Executors.newSingleThreadExecutor();
+//    @PostConstruct
+//    private void init(){
+//        //向线程池中创建这个线程
+//        SECKILL_ORDER_EXECUTOR.submit(new VoucherOrderHandler());
+//    }
 
-        @Override
-        public void run() {
-            while (true){
-                //1.获取队列中订单信息
-                try {
-                    VoucherOrder order = orderTasks.take();
-                    //创建订单
-                    handleVoucherOrder(order);
-                } catch (InterruptedException e) {
-                    log.error("exception",e);
-                }
-            }
-        }
-    }
+//    private class VoucherOrderHandler implements Runnable{
+//        @Override
+//        public void run() {
+//            while (true){
+//                //1.获取消息队列中订单信息
+//                try {
+//                    //判断消息获取是否成功
+//                    //获取失败进行下一次循环
+//                    //如果有消息
+//                    VoucherOrder order = orderTasks.take();
+//
+//                    //创建订单
+//                    handleVoucherOrder(order);
+//                } catch (InterruptedException e) {
+//                    log.error("exception",e);
+//                }
+//            }
+//        }
+//    }
 
-    private void handleVoucherOrder(VoucherOrder order) {
+    public void handleVoucherOrder(VoucherOrder order) {
         //一人一单
         Long userId = order.getUserId();
         //只锁同一个id,从常量池找。userId.toString().intern()
@@ -119,11 +131,13 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrder.setId(orderId);
         voucherOrder.setUserId(userId);
         voucherOrder.setVoucherId(voucherId);
-        orderTasks.add(voucherOrder);
+        //orderTasks.add(voucherOrder);
+        //mq发消息
+        mqSender.sendSeckillMessage(JSONUtil.toJsonStr(voucherOrder));
         //获取代理对象
         proxy = (IVoucherOrderService) AopContext.currentProxy();
         //返回订单id
-        return Result.ok();
+        return Result.ok(orderId);
     }
 //    @Override
 //    public Result seckillVoucher(Long voucherId) {

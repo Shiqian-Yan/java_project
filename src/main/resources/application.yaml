@@ -8,6 +8,26 @@ spring:
     url: jdbc:mysql://127.0.0.1:3306/hmdp?useSSL=false&serverTimezone=UTC
     username: root
     password: 123456
+  rabbitmq:
+    host: 192.168.204.130
+    username: guest
+    password: guest
+    virtual-host: /
+    port: 5672
+    listener:
+      simple:
+        concurrency: 10
+        max-concurrency: 10
+        prefetch: 1
+        auto-startup: true
+        default-requeue-rejected: true
+    template:
+      retry:
+        enabled: true
+        initial-interval: 1000ms
+        max-attempts: 3
+        max-interval: 10000ms
+        multiplier: 1
   redis:
     host: 192.168.204.130
     port: 6379
